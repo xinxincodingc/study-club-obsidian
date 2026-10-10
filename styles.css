@@ -89,6 +89,13 @@
 .sc-field>span { color:var(--sc-muted); }
 .sc-toolbar { display:flex; gap:12px; align-items:end; flex-wrap:wrap; margin-bottom:20px; }
 .sc-toolbar .sc-field { margin:0; min-width:180px; }
+.sc-volume { margin:18px 0 26px; border-top:2px solid var(--sc-blue); }
+.sc-volume>summary {
+  padding:17px 6px 13px; cursor:pointer; color:var(--sc-ink);
+  font:500 18px/1.5 "Songti SC",Georgia,serif;
+}
+.sc-volume>.sc-empty { margin:0 6px 12px; }
+.sc-volume>.sc-chapter { margin-left:16px; }
 .sc-chapter { border-bottom:1px solid var(--sc-line); margin:8px 0; }
 .sc-chapter summary { padding:17px 6px; cursor:pointer; font-size:14px; line-height:1.6; }
 .sc-chapter .sc-directory-row { padding-left:20px; }

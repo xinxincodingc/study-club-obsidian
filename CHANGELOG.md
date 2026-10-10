@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3 - 2026-10-10
+
+- Made the learning directory follow top-level folders under `01 知识库`, including empty folders.
+- Included ordinary Markdown files without Study Club frontmatter.
+- Grouped directory entries by their physical folder path.
+- Repainted the open learning directory after file and folder changes.
+
 ## 0.1.2 - 2026-10-10
 
 - Added an overdue-first review queue with progress and next-review dates.

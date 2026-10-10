@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { validateBackup, planImport, makeNote, review, reviewable, reviewQueue, rewriteMovedWikilinks, safeRoot, isPathInRoot, quizFromMarkdown, retrieve } from '../src/core'
+import { validateBackup, planImport, makeNote, review, reviewable, reviewQueue, rewriteMovedWikilinks, safeRoot, isPathInRoot, folderTrail, isLibraryNote, quizFromMarkdown, retrieve } from '../src/core'
 
 function fixture() {
   return {
@@ -76,6 +76,15 @@ test('legacy absolute wiki links follow the migrated folder without changing rel
   const source = '[[Study Club/领域/笔记|标题]]\\n![[Study Club/附件.png]]\\n[[相对笔记]]'
   assert.equal(rewriteMovedWikilinks(source, 'Study Club', '01 知识库/旧版迁移'),
     '[[01 知识库/旧版迁移/领域/笔记|标题]]\\n![[01 知识库/旧版迁移/附件.png]]\\n[[相对笔记]]')
+})
+test('library follows physical folders and includes ordinary Markdown notes', () => {
+  assert.deepEqual(folderTrail('01 知识库/工作内容/项目 A/会议.md', '01 知识库'), ['工作内容', '项目 A'])
+  assert.deepEqual(folderTrail('其他目录/会议.md', '01 知识库'), [])
+  assert.equal(isLibraryNote({}, '会议'), true)
+  assert.equal(isLibraryNote({ 'sc-kind': 'card' }, '学习目录'), true)
+  assert.equal(isLibraryNote({ 'sc-kind': 'question' }, '追问'), false)
+  assert.equal(isLibraryNote({}, '复习记录'), false)
+  assert.equal(isLibraryNote({}, '学习目录'), false)
 })
 test('SM-2 writes a new schedule without mutating the original, with local calendar rollover', () => {
   const before = { ease: 2.5, interval: 6, repetitions: 2, dueDate: '2026-12-30' }

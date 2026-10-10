@@ -80,6 +80,17 @@ export function isPathInRoot(path: string, root: string): boolean {
   const normalizedPath = path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
   return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`)
 }
+export function folderTrail(path: string, root: string): string[] {
+  if (!isPathInRoot(path, root)) return []
+  const normalizedRoot = safeRoot(root)
+  const relative = path.replace(/\\/g, '/').slice(normalizedRoot.length).replace(/^\/+/, '')
+  const parts = relative.split('/').filter(Boolean)
+  return parts.slice(0, -1)
+}
+export function isLibraryNote(meta: Record<string, unknown>, basename: string): boolean {
+  return meta['sc-kind'] === 'card' ||
+    (meta['sc-kind'] === undefined && !['复习记录', '学习目录'].includes(basename))
+}
 export function rewriteMovedWikilinks(content: string, source: string, destination: string): string {
   const from = `[[${safeRoot(source)}/`
   const to = `[[${safeRoot(destination)}/`

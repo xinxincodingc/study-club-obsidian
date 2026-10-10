@@ -4,7 +4,7 @@ import {
 } from 'obsidian'
 import {
   STATUS, type Status, type Note, type Quiz, type Backup, type PlannedFile,
-  day, excerpt, frontmatter, isPathInRoot, makeNote, planImport, retrieve, review, reviewable, reviewQueue, rewriteMovedWikilinks,
+  day, excerpt, folderTrail, frontmatter, isLibraryNote, isPathInRoot, makeNote, planImport, retrieve, review, reviewable, reviewQueue, rewriteMovedWikilinks,
   safeRoot, safeSegment, schedule, validateBackup, wikilink,
 } from './core'
 
@@ -110,15 +110,23 @@ export default class StudyClub extends Plugin {
       if (!isPathInRoot(file.path, KNOWLEDGE_ROOT)) continue
       // Read the actual file: metadata cache can lag just-created/imported notes.
       const { meta, body } = unpack(await this.app.vault.cachedRead(file))
-      if (meta['sc-kind'] === 'card') notes.push(makeNote(file.path, meta, body))
       if (meta['sc-kind'] === 'question') questions.push({ file,
         title: body.match(/^# (.+)$/m)?.[1] || file.basename, resolved: meta['sc-resolved'] === true })
+      else if (isLibraryNote(meta, file.basename)) {
+        const trail = folderTrail(file.path, KNOWLEDGE_ROOT)
+        notes.push(makeNote(file.path, {
+          'sc-title': file.basename,
+          'sc-domain': trail[0] || '根目录',
+          'sc-topic': trail.slice(1).join(' / ') || '未分类',
+          ...meta,
+        }, body))
+      }
     }
     if (revision !== this.revision) return
     this.notes = notes.sort((a, b) => a.path.localeCompare(b.path, 'zh-CN'))
     this.questions = questions
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW))
-      if (leaf.view instanceof NotebookView) leaf.view.updateCount()
+      if (leaf.view instanceof NotebookView) leaf.view.dataChanged()
   }
   hasLegacyFolder(): boolean { return this.app.vault.getAbstractFileByPath(LEGACY_ROOT) instanceof TFolder }
   private availablePath(path: string, extension = ''): string {
@@ -318,6 +326,7 @@ class NotebookView extends ItemView {
   private navEl!: HTMLElement
   private rendered = new Component()
   private renderId = 0
+  private libraryRefresh?: () => void
   constructor(leaf: WorkspaceLeaf, private plugin: StudyClub) { super(leaf) }
   getViewType() { return VIEW }
   getDisplayText() { return 'Study Club' }
@@ -349,8 +358,13 @@ class NotebookView extends ItemView {
   }
   async onClose() { this.renderId++; this.removeChild(this.rendered); this.contentEl.empty() }
   updateCount() { this.count?.setText(`${this.plugin.notes.length} 张学习卡片 · Markdown 本地保存`) }
+  dataChanged() {
+    this.updateCount()
+    if (this.page === 'library') this.libraryRefresh?.()
+  }
   async navigate(page: Page) {
     this.page = page
+    this.libraryRefresh = undefined
     await this.plugin.refresh()
     const id = ++this.renderId
     this.removeChild(this.rendered); this.rendered = new Component(); this.addChild(this.rendered)
@@ -463,27 +477,50 @@ class NotebookView extends ItemView {
       const notes = this.plugin.notes.filter(n => (!status.value || n.status === status.value) &&
         `${n.title} ${n.domain} ${n.topic} ${excerpt(n, 8000)}`.toLowerCase().includes(query))
       list.createEl('p', { text: `${notes.length} 张卡片`, cls: 'sc-muted', attr: { 'aria-live': 'polite' } })
-      const groups = new Map<string, Note[]>()
-      for (const n of notes) { const key = `${n.domain} / ${n.topic}`; groups.set(key, [...(groups.get(key) || []), n]) }
-      for (const [name, notes] of groups) {
-        const group = list.createEl('details', { cls: 'sc-chapter' })
-        if (query || groups.size < 4) group.open = true
-        group.createEl('summary', { text: `${name} · ${notes.length}` })
-        for (const n of notes) {
-          const row = group.createDiv({ cls: 'sc-directory-row' })
-          action(row, n.title, () => this.plugin.openNote(n.path))
-          const select = row.createEl('select', { attr: { 'aria-label': `${n.title}的学习状态` } })
-          for (const [key, label] of Object.entries(STATUS)) select.createEl('option', { value: key, text: label })
-          select.value = n.status
-          select.addEventListener('change', async () => {
-            select.disabled = true
-            try { await this.plugin.setStatus(n.path, select.value as Status); new Notice('学习状态已保存到笔记属性。') }
-            catch (e) { select.value = n.status; new Notice(message(e)) }
-            finally { select.disabled = false }
-          })
+      const root = this.app.vault.getAbstractFileByPath(KNOWLEDGE_ROOT)
+      const topFolders = root instanceof TFolder ? root.children.filter(child => child instanceof TFolder)
+        .map(folder => folder.name).sort((a, b) => a.localeCompare(b, 'zh-CN')) : []
+      const volumes = new Map<string, Note[]>(topFolders.map(name => [name, []]))
+      for (const note of notes) {
+        const volume = folderTrail(note.path, KNOWLEDGE_ROOT)[0] || '根目录'
+        volumes.set(volume, [...(volumes.get(volume) || []), note])
+      }
+      for (const [volumeName, volumeNotes] of volumes) {
+        if (query && !volumeNotes.length && !volumeName.toLowerCase().includes(query)) continue
+        const volume = list.createEl('details', { cls: 'sc-volume' })
+        volume.open = Boolean(query) || volumes.size <= 3
+        volume.createEl('summary', { text: `${volumeName} · ${volumeNotes.length} 张` })
+        if (!volumeNotes.length) {
+          volume.createEl('p', { text: '这个文件夹还没有 Markdown 笔记。', cls: 'sc-empty' })
+          continue
+        }
+        const groups = new Map<string, Note[]>()
+        for (const note of volumeNotes) {
+          const inner = folderTrail(note.path, KNOWLEDGE_ROOT).slice(1)
+          const key = inner.join(' / ') || '直接笔记'
+          groups.set(key, [...(groups.get(key) || []), note])
+        }
+        for (const [name, groupedNotes] of groups) {
+          const group = volume.createEl('details', { cls: 'sc-chapter' })
+          if (query || groups.size < 4) group.open = true
+          group.createEl('summary', { text: `${name} · ${groupedNotes.length}` })
+          for (const note of groupedNotes) {
+            const row = group.createDiv({ cls: 'sc-directory-row' })
+            action(row, note.title, () => this.plugin.openNote(note.path))
+            const select = row.createEl('select', { attr: { 'aria-label': `${note.title}的学习状态` } })
+            for (const [key, label] of Object.entries(STATUS)) select.createEl('option', { value: key, text: label })
+            select.value = note.status
+            select.addEventListener('change', async () => {
+              select.disabled = true
+              try { await this.plugin.setStatus(note.path, select.value as Status); new Notice('学习状态已保存到笔记属性。') }
+              catch (e) { select.value = note.status; new Notice(message(e)) }
+              finally { select.disabled = false }
+            })
+          }
         }
       }
     }
+    this.libraryRefresh = paint
     search.addEventListener('input', paint); status.addEventListener('change', paint); paint()
   }
   private links() {
