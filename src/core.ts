@@ -65,8 +65,13 @@ export function safeSegment(value: string): string {
 export function safeRoot(root: string): string {
   const parts = root.replace(/\\/g, '/').split('/')
   if (!parts.length || parts.some(p => !p || p === '.' || p === '..' || p.startsWith('.') || safeSegment(p) !== p))
-    throw new Error('目录请使用仓库内的普通文件夹名称，例如 Study Club；不能使用隐藏目录或 ../。')
+    throw new Error('目录请使用仓库内的普通文件夹名称，例如 01 知识库；不能使用隐藏目录或 ../。')
   return parts.join('/')
+}
+export function isPathInRoot(path: string, root: string): boolean {
+  const normalizedRoot = safeRoot(root)
+  const normalizedPath = path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`)
 }
 export function wikilink(path: string, label?: string): string {
   const target = path.replace(/\.md$/, '')
@@ -151,9 +156,6 @@ export function planImport(backup: Backup, destination: string): PlannedFile[] {
   }))
   files.push({ path: `${root}/复习记录.md`, content: '# 导入的复习记录\n\n' +
     backup.reviewLogs.map(r => `- ${new Date(r.reviewedAt).toISOString()} · 评分 ${r.grade} · ${paths.has(r.cardId) ? wikilink(paths.get(r.cardId)!) : r.cardId}`).join('\n') + '\n' })
-  files.push({ path: `${root}/学习目录.md`, content: '# 我的学习目录\n\n' +
-    sort(backup.domains).map(d => `## ${d.name}\n\n` + sort(backup.topics.filter(t => t.domainId === d.id))
-      .map(t => `### ${t.name}\n\n` + sort(backup.cards.filter(c => c.topicId === t.id)).map(c => `- ${wikilink(paths.get(c.id)!, c.title)}`).join('\n')).join('\n\n')).join('\n\n') + '\n' })
   return files
 }
 export function splitSections(body: string): Record<string, string> {

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { validateBackup, planImport, makeNote, review, reviewable, safeRoot, quizFromMarkdown, retrieve } from '../src/core'
+import { validateBackup, planImport, makeNote, review, reviewable, safeRoot, isPathInRoot, quizFromMarkdown, retrieve } from '../src/core'
 
 function fixture() {
   return {
@@ -30,8 +30,9 @@ function readPlanned(path: string, content: string) {
 }
 test('migration covers every domain, preserves learning content/schedule and resolves every wiki link', () => {
   const backup = validateBackup(JSON.stringify(fixture()))
-  const plan = planImport(backup, 'Study Club/导入-测试')
+  const plan = planImport(backup, '01 知识库/导入-测试')
   assert.equal(plan.filter(f => f.content.includes('"card"')).length, 25)
+  assert.ok(!plan.some(f => f.path.endsWith('/学习目录.md')))
   assert.equal(new Set(plan.map(f => f.path)).size, plan.length)
   const paths = new Set(plan.map(f => f.path.replace(/\.md$/, '')))
   const notes = plan.filter(f => f.content.includes('sc-kind: "card"')).map(f => readPlanned(f.path, f.content))
@@ -44,7 +45,7 @@ test('migration covers every domain, preserves learning content/schedule and res
     assert.equal(n.quiz[0].answer, card.quiz[0].answer)
     assert.equal(n.dueDate, card.dueDate)
     assert.equal(n.ease, card.ease)
-    assert.ok(n.path.startsWith('Study Club/导入-测试/'))
+    assert.ok(n.path.startsWith('01 知识库/导入-测试/'))
   }
   for (const file of plan) for (const link of file.content.matchAll(/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g))
     assert.ok(paths.has(link[1]), `Unresolved link ${link[1]}`)
@@ -56,7 +57,7 @@ test('duplicate title/path normalization collisions stay separate', () => {
   const source = fixture()
   source.cards[0].topicId = 't0'; source.cards[1].topicId = 't0'
   source.cards[1].order = source.cards[0].order
-  const plan = planImport(validateBackup(JSON.stringify(source)), 'Study Club')
+  const plan = planImport(validateBackup(JSON.stringify(source)), '01 知识库')
   assert.equal(new Set(plan.map(f => f.path.toLowerCase())).size, plan.length)
 })
 test('invalid data stops before producing files and parent traversal is rejected', () => {
@@ -67,6 +68,9 @@ test('invalid data stops before producing files and parent traversal is rejected
   assert.throws(() => validateBackup(JSON.stringify(duplicate)), /重复 ID/)
   for (const path of ['../outside', '/absolute', '.obsidian/plugins', 'foo/../bar', 'a//b'])
     assert.throws(() => safeRoot(path))
+  assert.equal(isPathInRoot('01 知识库/领域/笔记.md', '01 知识库'), true)
+  assert.equal(isPathInRoot('01 知识库旧/笔记.md', '01 知识库'), false)
+  assert.equal(isPathInRoot('Study Club/笔记.md', '01 知识库'), false)
 })
 test('SM-2 writes a new schedule without mutating the original, with local calendar rollover', () => {
   const before = { ease: 2.5, interval: 6, repetitions: 2, dueDate: '2026-12-30' }

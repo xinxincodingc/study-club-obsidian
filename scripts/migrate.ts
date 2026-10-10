@@ -9,7 +9,7 @@ try { await access(destination); throw new Error('目标目录已存在；请选
 catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e }
 const raw = await readFile(input, 'utf8')
 const backup = validateBackup(raw)
-const root = `Study Club/导入-${day()}`
+const root = `01 知识库/导入-${day()}`
 const plan = planImport(backup, root)
 plan.unshift({ path: `${root}/原始备份.json`, content: raw })
 for (const file of plan) {

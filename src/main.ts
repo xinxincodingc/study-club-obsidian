@@ -1,17 +1,19 @@
 import {
   App, Component, ItemView, MarkdownRenderer, Modal, Notice, Plugin, PluginSettingTab,
-  Setting, TFile, WorkspaceLeaf, normalizePath, parseYaml, requestUrl, setIcon,
+  Setting, TFile, TFolder, WorkspaceLeaf, parseYaml, requestUrl, setIcon,
 } from 'obsidian'
 import {
   STATUS, type Status, type Note, type Quiz, type Backup, type PlannedFile,
-  day, excerpt, frontmatter, makeNote, planImport, retrieve, review, reviewable,
+  day, excerpt, frontmatter, isPathInRoot, makeNote, planImport, retrieve, review, reviewable,
   safeRoot, safeSegment, schedule, validateBackup, wikilink,
 } from './core'
 
 const VIEW = 'study-club-notebook'
+const KNOWLEDGE_ROOT = '01 知识库'
+const LEGACY_ROOT = 'Study Club'
 type Page = 'home' | 'workspace' | 'library' | 'links' | 'review' | 'quiz' | 'questions' | 'ask' | 'share' | 'import'
 interface Preferences { root: string; baseUrl: string; model: string }
-const DEFAULTS: Preferences = { root: 'Study Club', baseUrl: '', model: '' }
+const DEFAULTS: Preferences = { root: KNOWLEDGE_ROOT, baseUrl: '', model: '' }
 function message(error: unknown): string { return error instanceof Error ? error.message : '操作失败，请重试。' }
 function action(parent: HTMLElement, label: string, run: () => unknown, primary = false): HTMLButtonElement {
   const button = parent.createEl('button', { text: label, cls: primary ? 'sc-button sc-primary' : 'sc-button' })
@@ -54,12 +56,18 @@ export default class StudyClub extends Plugin {
   private revision = 0
   async onload() {
     this.settings = { ...DEFAULTS, ...await this.loadData() }
+    if (this.settings.root !== KNOWLEDGE_ROOT) {
+      this.settings.root = KNOWLEDGE_ROOT
+      await this.saveData(this.settings)
+    }
     this.registerView(VIEW, leaf => new NotebookView(leaf, this))
     this.addRibbonIcon('book-heart', '打开 Study Club', () => { void this.open() })
     this.addCommand({ id: 'open', name: '打开学习手账', callback: () => { void this.open() } })
     this.addCommand({ id: 'review', name: '今日复习', callback: () => { void this.open('review') } })
     this.addCommand({ id: 'new', name: '新建费曼笔记', callback: () => new CreateNoteModal(this).open() })
     this.addCommand({ id: 'import', name: '导入网页版 JSON 备份', callback: () => new ImportModal(this).open() })
+    this.addCommand({ id: 'migrate-legacy-folder', name: '迁移旧版 Study Club 笔记到 01 知识库',
+      callback: () => { void this.migrateLegacy().catch(e => new Notice(message(e), 8000)) } })
     this.addCommand({ id: 'adopt', name: '将当前 Markdown 纳入学习手账', checkCallback: checking => {
       const file = this.app.workspace.getActiveFile()
       if (!file || file.extension !== 'md') return false
@@ -90,6 +98,7 @@ export default class StudyClub extends Plugin {
     const revision = ++this.revision
     const notes: Note[] = [], questions: StudyClub['questions'] = []
     for (const file of this.app.vault.getMarkdownFiles()) {
+      if (!isPathInRoot(file.path, KNOWLEDGE_ROOT)) continue
       // Read the actual file: metadata cache can lag just-created/imported notes.
       const { meta, body } = unpack(await this.app.vault.cachedRead(file))
       if (meta['sc-kind'] === 'card') notes.push(makeNote(file.path, meta, body))
@@ -102,6 +111,24 @@ export default class StudyClub extends Plugin {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW))
       if (leaf.view instanceof NotebookView) leaf.view.updateCount()
   }
+  hasLegacyFolder(): boolean { return this.app.vault.getAbstractFileByPath(LEGACY_ROOT) instanceof TFolder }
+  private availablePath(path: string, extension = ''): string {
+    if (!this.app.vault.getAbstractFileByPath(`${path}${extension}`)) return `${path}${extension}`
+    for (let i = 2; ; i++) {
+      const candidate = `${path}-${i}${extension}`
+      if (!this.app.vault.getAbstractFileByPath(candidate)) return candidate
+    }
+  }
+  async migrateLegacy(): Promise<string> {
+    const legacy = this.app.vault.getAbstractFileByPath(LEGACY_ROOT)
+    if (!(legacy instanceof TFolder)) throw new Error('没有找到旧版 Study Club 文件夹，无需迁移。')
+    const root = this.app.vault.getAbstractFileByPath(KNOWLEDGE_ROOT)
+    const destination = root ? this.availablePath(`${KNOWLEDGE_ROOT}/从旧版 Study Club 迁移-${day()}`) : KNOWLEDGE_ROOT
+    await this.app.fileManager.renameFile(legacy, destination)
+    await this.refresh()
+    new Notice(`迁移完成：旧笔记已移动到 ${destination}，内部链接已同步更新。`, 8000)
+    return destination
+  }
   neighbors(note: Note): string[] {
     const all = this.app.metadataCache.resolvedLinks
     const paths = new Set(Object.keys(all[note.path] || {}))
@@ -111,13 +138,19 @@ export default class StudyClub extends Plugin {
   }
   async openNote(path: string) { await this.app.workspace.openLinkText(path, '', true) }
   async adopt(file: TFile) {
+    if (!isPathInRoot(file.path, KNOWLEDGE_ROOT)) {
+      const folder = `${KNOWLEDGE_ROOT}/我的知识库/未分类`
+      await folders(this.app, folder)
+      const destination = this.availablePath(`${folder}/${safeSegment(file.basename)}`, '.md')
+      await this.app.fileManager.renameFile(file, destination)
+    }
     await this.app.fileManager.processFrontMatter(file, fm => {
       fm['sc-kind'] = 'card'; fm['sc-id'] ??= crypto.randomUUID(); fm['sc-title'] ??= file.basename
       fm['sc-status'] ??= 'learning'; fm['sc-domain'] ??= '我的知识库'; fm['sc-topic'] ??= '未分类'
       fm['sc-due'] ??= day(); fm['sc-ease'] ??= 2.5; fm['sc-interval'] ??= 0; fm['sc-repetitions'] ??= 0
     })
     await this.refresh()
-    new Notice('已纳入学习手账，正文保持原样。')
+    new Notice(`已移动到 ${KNOWLEDGE_ROOT} 并纳入学习手账，正文保持原样。`)
   }
   async grade(path: string, grade: number) {
     if (this.mutations.has(path)) throw new Error('正在保存这张卡片，请稍后。')
@@ -145,7 +178,7 @@ export default class StudyClub extends Plugin {
     await this.refresh()
   }
   async importBackup(backup: Backup, raw: string, progress: (n: number, total: number) => void): Promise<string> {
-    const root = `${safeRoot(this.settings.root)}/导入-${day()}-${crypto.randomUUID().slice(0, 8)}`
+    const root = `${KNOWLEDGE_ROOT}/导入-${day()}-${crypto.randomUUID().slice(0, 8)}`
     const plan = planImport(backup, root)
     const original: PlannedFile = { path: `${root}/原始备份.json`, content: raw }
     const all = [original, ...plan]
@@ -219,7 +252,8 @@ class ImportModal extends Modal {
             const root = await this.plugin.importBackup(backup, raw, (n, total) => progress.setText(`正在写入 ${n} / ${total}…`))
             progress.setText(`完成：${backup.cards.length} 张卡片已写入 ${root}`)
             new Notice(`导入完成：${backup.cards.length} 张卡片。`)
-            await this.plugin.openNote(`${root}/学习目录.md`)
+            this.close()
+            await this.plugin.open('library')
           } catch (e) {
             progress.setText(`导入未完成：${message(e)} 已写入的文件和原始备份仍保留在新增目录中。`)
           } finally { this.running = false; input.disabled = false }
@@ -368,7 +402,7 @@ class NotebookView extends ItemView {
     }
   }
   private library() {
-    this.heading('我的学习目录', '在 Obsidian 编辑正文，用 [[双向链接]] 连接概念。学习状态可在这里修改。')
+    this.heading('我的学习目录', `这里实时读取「${KNOWLEDGE_ROOT}」。在 Obsidian 编辑正文后，目录会自动同步。`)
     const toolbar = this.main.createDiv({ cls: 'sc-toolbar' })
     const search = field(toolbar, '搜索标题、主题或正文')
     const status = toolbar.createEl('select', { attr: { 'aria-label': '筛选学习状态' } })
@@ -595,13 +629,24 @@ class NotebookView extends ItemView {
     }, true)
   }
   private importPage() {
-    this.heading('把自己的笔记带过来', '网页版与 Obsidian 使用独立的数据副本；导入后不会自动同步。')
+    this.heading('把自己的笔记带过来', `「${KNOWLEDGE_ROOT}」是唯一笔记源；Study Club 是实时读取这些 Markdown 的学习界面。`)
+    if (this.plugin.hasLegacyFolder()) {
+      const migration = this.main.createDiv({ cls: 'sc-note-paper' })
+      migration.createEl('h2', { text: '发现旧版 Study Club 笔记文件夹' })
+      migration.createEl('p', { text: `迁移会把整个旧文件夹移动到「${KNOWLEDGE_ROOT}」，并由 Obsidian 更新内部链接；不会覆盖已有文件。` })
+      action(migration, '迁移旧版笔记', async () => {
+        const destination = await this.plugin.migrateLegacy()
+        new Notice(`已迁移到 ${destination}`)
+        await this.navigate('library')
+      }, true)
+    }
     action(this.main, '导入全量 JSON', () => new ImportModal(this.plugin).open(), true)
     const section = this.main.createDiv({ cls: 'sc-note-paper' })
     section.createEl('h2', { text: '每张卡片，都是一个 Markdown 文件' })
     const ul = section.createEl('ul')
     for (const item of [
       '领域与主题 → 文件夹；定义、费曼解释、类比、题目 → Markdown 正文。',
+      `所有学习卡片和追问统一保存在「${KNOWLEDGE_ROOT}」，插件目录实时读取这里。`,
       '卡片关联 → [[双向链接]]；学习状态与复习日期 → 笔记属性。',
       '追问 → 独立笔记；已有复习记录 → 记录文件。',
       '原始 JSON 留在导入目录，保留网页版装饰、问答历史等原始数据。',
@@ -615,11 +660,8 @@ class ClubSettings extends PluginSettingTab {
   display() {
     this.containerEl.empty()
     this.containerEl.createEl('h2', { text: 'Study Club' })
-    new Setting(this.containerEl).setName('新笔记与导入目录').setDesc('仓库内路径；修改只影响之后创建的文件。')
-      .addText(text => text.setValue(this.plugin.settings.root).onChange(async value => {
-        try { this.plugin.settings.root = safeRoot(value.trim()); await this.plugin.saveData(this.plugin.settings) }
-        catch { /* Keep the last valid folder while typing. */ }
-      }))
+    new Setting(this.containerEl).setName('知识库目录').setDesc('学习目录、新建笔记、追问和导入内容统一实时读取此文件夹。')
+      .addText(text => { text.setValue(KNOWLEDGE_ROOT); text.setDisabled(true) })
     this.containerEl.createEl('h3', { text: '可选 AI 问答' })
     this.containerEl.createEl('p', { text: '只有点击「发送摘录，让 AI 整理」才会发送问题和检索到的笔记片段。接口须兼容 Chat Completions。' })
     new Setting(this.containerEl).setName('Base URL').setDesc('填写到 /v1 或 /api/v3，不包含 /chat/completions。')
