@@ -1,0 +1,88 @@
+/* Study Club — woven blue cover, warm paper, a quiet space for your ideas. */
+body {
+  --font-text-theme:"Avenir Next","PingFang SC","Microsoft YaHei",sans-serif;
+  --font-interface-theme:"Avenir Next","PingFang SC","Microsoft YaHei",sans-serif;
+  --font-monospace-theme:"SFMono-Regular",Consolas,monospace;
+  --h1-font:"Songti SC","Noto Serif CJK SC",Georgia,serif;
+  --h2-font:var(--h1-font); --h3-font:var(--h1-font);
+  --h1-size:2em; --h2-size:1.5em; --h3-size:1.18em;
+  --h1-weight:500; --h2-weight:500; --h3-weight:500;
+  --line-height-normal:1.85; --file-line-width:760px;
+  --radius-s:3px; --radius-m:5px; --radius-l:7px;
+  --tab-radius-active:4px; --input-radius:3px; --button-radius:3px;
+  --nav-item-padding:8px 12px; --nav-item-radius:3px;
+  --sc-gingham:linear-gradient(90deg,#7ba5bf1f 50%,transparent 50%),linear-gradient(#7ba5bf1f 50%,transparent 50%);
+}
+.theme-light {
+  --background-primary:#fffef9; --background-primary-alt:#f6f6f0;
+  --background-secondary:#dfebf1; --background-secondary-alt:#d0e2ec;
+  --background-modifier-border:#bfd0dc; --background-modifier-border-hover:#8ca9bf;
+  --background-modifier-border-focus:#608aa8; --background-modifier-hover:#92b4cd24;
+  --background-modifier-active-hover:#92b4cd40;
+  --text-normal:#304b61; --text-muted:#536e81; --text-faint:#687e8e;
+  --text-accent:#356c93; --text-accent-hover:#245576; --text-on-accent:#fffef9;
+  --interactive-accent:#426f8e; --interactive-accent-hover:#335b77;
+  --interactive-normal:#f5f8f8; --interactive-hover:#e5eff4;
+  --color-accent:#426f8e; --color-accent-hsl:204,36%,41%;
+  --text-selection:#a7cae36b; --tag-background:#e6eff3; --tag-color:#3e607b;
+  --link-color:#356b93; --link-color-hover:#254f70; --link-unresolved-color:#89647b;
+  --nav-item-color:#3b5a72; --nav-item-color-active:#294b65; --nav-item-background-active:#fffef9;
+  --titlebar-background:#d2e4ef; --titlebar-background-focused:#d2e4ef;
+  --ribbon-background:#c9dfea; --tab-container-background:#dceaf1;
+  --code-normal:#5c4770; --code-background:#edf3f6;
+  --blockquote-border-color:#99bace; --blockquote-background-color:#f0f5f5;
+  --graph-node:#648cab; --graph-node-focused:#b57894; --graph-node-tag:#85a594;
+  --graph-line:#b9c9d5; --graph-text:#304b61;
+  --table-border-color:#c3d5e0; --table-header-background:#e9f1f5;
+}
+.theme-dark {
+  --background-primary:#1c2933; --background-primary-alt:#20303c;
+  --background-secondary:#253b4a; --background-secondary-alt:#2b4455;
+  --background-modifier-border:#425c6f; --background-modifier-border-hover:#6c8fa6;
+  --background-modifier-border-focus:#a2c5dc; --background-modifier-hover:#a7c9e018;
+  --text-normal:#e0eaf0; --text-muted:#b2c6d5; --text-faint:#90aabb;
+  --text-accent:#acd0eb; --text-accent-hover:#cee7f6; --text-on-accent:#172631;
+  --interactive-accent:#a6c9e0; --interactive-accent-hover:#c0dcec;
+  --interactive-normal:#2b4050; --interactive-hover:#365265;
+  --color-accent:#a6c9e0; --color-accent-hsl:204,48%,76%;
+  --text-selection:#91b7d644; --tag-background:#324e60; --tag-color:#c8deee;
+  --link-color:#a6d2ef; --link-color-hover:#cce8fa; --link-unresolved-color:#d6b0c6;
+  --nav-item-color:#c2d5e3; --nav-item-color-active:#f0f5f8; --nav-item-background-active:#3a5569;
+  --titlebar-background:#243b4b; --titlebar-background-focused:#243b4b;
+  --ribbon-background:#243c4d; --tab-container-background:#233a4a;
+  --code-normal:#d7c6e8; --code-background:#263b49;
+  --blockquote-border-color:#7396af; --blockquote-background-color:#253a48;
+  --graph-node:#99c2de; --graph-node-focused:#ddaac7; --graph-node-tag:#aed0bf;
+  --graph-line:#526f85; --graph-text:#d5e6f2;
+  --table-border-color:#425c6f; --table-header-background:#2c4252;
+}
+.workspace-split.mod-left-split .workspace-leaf-content,
+.workspace-split.mod-right-split .workspace-leaf-content {
+  background-color:var(--background-secondary);
+  background-image:var(--sc-gingham); background-size:28px 28px;
+}
+.workspace-ribbon { border-right:1px solid var(--background-modifier-border); }
+.workspace-tab-header.is-active { box-shadow:none; border-top:2px solid var(--interactive-accent); }
+.nav-folder-title { font-weight:600; }
+.nav-file-title,.nav-folder-title { margin:3px 5px; }
+.nav-file-title.is-active { border:1px solid var(--background-modifier-border); }
+.markdown-source-view.mod-cm6 .cm-scroller { padding-block:30px; }
+.markdown-rendered { color:var(--text-normal); }
+.markdown-rendered h1 { padding-bottom:18px; border-bottom:3px double var(--background-modifier-border); }
+.markdown-rendered h2 { margin-top:2em; }
+.markdown-rendered blockquote { padding:12px 20px; border-left-width:2px; }
+.markdown-rendered hr { border:0; border-top:1px solid var(--background-modifier-border); }
+.metadata-container { border-bottom:1px solid var(--background-modifier-border); padding-bottom:18px; }
+.markdown-preview-view.sc-dashboard .markdown-preview-sizer { max-width:920px; }
+.sc-dashboard .callout { background:var(--background-primary-alt); border:1px solid var(--background-modifier-border); border-radius:3px; }
+.sc-dashboard .callout-title { font-family:var(--h1-font); font-weight:500; }
+.sc-dashboard table.dataview { width:100%; font-size:14px; }
+.sc-dashboard table.dataview td,.sc-dashboard table.dataview th { padding:12px 14px; }
+.kanban-plugin__lane { border:1px solid var(--background-modifier-border); background:var(--background-primary-alt); border-radius:4px; }
+.kanban-plugin__item { border-radius:3px; box-shadow:none; border:1px solid var(--background-modifier-border); }
+.kanban-plugin__lane-title { font-family:var(--h1-font); }
+.task-list-item { padding-block:5px; }
+.calendar .day { border-radius:3px; }
+.workspace-leaf-content[data-type="markdown"] .view-header-title { font-family:var(--h1-font); }
+button:focus-visible,.clickable-icon:focus-visible { outline:2px solid var(--interactive-accent); outline-offset:3px; }
+@media (prefers-reduced-motion:reduce) { * { scroll-behavior:auto !important; } }

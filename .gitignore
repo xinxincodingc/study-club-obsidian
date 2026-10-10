@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+.claude/
+.claudian/
+example-vault/.obsidian/plugins/
+example-vault/.obsidian/themes/
+example-vault/.obsidian/workspace*.json
+example-vault/.trash/
+*backup*.json
+*备份*.json
