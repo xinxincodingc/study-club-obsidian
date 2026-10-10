@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2 - 2026-10-10
+
+- Added an overdue-first review queue with progress and next-review dates.
+- Added Space to reveal answers and number keys 1-4 for grading.
+- Requeued "Again" cards within the current session and added one-step undo.
+- Made legacy-folder migration repair absolute wiki links independently of Obsidian settings.
+- Removed recognizable generated `学习目录.md` files during legacy migration.
+
 ## 0.1.1 - 2026-10-10
 
 - Fixed the learning directory to read only from `01 知识库`.

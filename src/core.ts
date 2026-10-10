@@ -57,6 +57,13 @@ export function reviewable(note: Note): boolean {
   return note.repetitions > 0 || (note.status !== 'to-learn' &&
     Boolean((note.sections['一句话定义'] || note.sections['费曼解释'] || '').trim()))
 }
+export function reviewQueue(notes: Note[], today = day()): Note[] {
+  return notes.filter(note => reviewable(note) && note.dueDate <= today).sort((a, b) =>
+    a.dueDate.localeCompare(b.dueDate) ||
+    b.interval - a.interval ||
+    a.title.localeCompare(b.title, 'zh-CN') ||
+    a.path.localeCompare(b.path, 'zh-CN'))
+}
 export function safeSegment(value: string): string {
   const cleaned = value.normalize('NFC').replace(/[\\/:*?"<>|#\[\]\u0000-\u001f]/g, ' ')
     .replace(/\s+/g, ' ').replace(/^[.\s]+|[.\s]+$/g, '').slice(0, 72).trim()
@@ -72,6 +79,11 @@ export function isPathInRoot(path: string, root: string): boolean {
   const normalizedRoot = safeRoot(root)
   const normalizedPath = path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
   return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`)
+}
+export function rewriteMovedWikilinks(content: string, source: string, destination: string): string {
+  const from = `[[${safeRoot(source)}/`
+  const to = `[[${safeRoot(destination)}/`
+  return content.split(from).join(to)
 }
 export function wikilink(path: string, label?: string): string {
   const target = path.replace(/\.md$/, '')

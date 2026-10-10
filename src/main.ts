@@ -4,7 +4,7 @@ import {
 } from 'obsidian'
 import {
   STATUS, type Status, type Note, type Quiz, type Backup, type PlannedFile,
-  day, excerpt, frontmatter, isPathInRoot, makeNote, planImport, retrieve, review, reviewable,
+  day, excerpt, frontmatter, isPathInRoot, makeNote, planImport, retrieve, review, reviewable, reviewQueue, rewriteMovedWikilinks,
   safeRoot, safeSegment, schedule, validateBackup, wikilink,
 } from './core'
 
@@ -13,6 +13,15 @@ const KNOWLEDGE_ROOT = '01 知识库'
 const LEGACY_ROOT = 'Study Club'
 type Page = 'home' | 'workspace' | 'library' | 'links' | 'review' | 'quiz' | 'questions' | 'ask' | 'share' | 'import'
 interface Preferences { root: string; baseUrl: string; model: string }
+interface ReviewChange {
+  path: string
+  previous: ReturnType<typeof schedule>
+  next: ReturnType<typeof schedule>
+  previousStatus: unknown
+  previousReviews: unknown[]
+  hadReviews: boolean
+  entry: string
+}
 const DEFAULTS: Preferences = { root: KNOWLEDGE_ROOT, baseUrl: '', model: '' }
 function message(error: unknown): string { return error instanceof Error ? error.message : '操作失败，请重试。' }
 function action(parent: HTMLElement, label: string, run: () => unknown, primary = false): HTMLButtonElement {
@@ -125,6 +134,15 @@ export default class StudyClub extends Plugin {
     const root = this.app.vault.getAbstractFileByPath(KNOWLEDGE_ROOT)
     const destination = root ? this.availablePath(`${KNOWLEDGE_ROOT}/从旧版 Study Club 迁移-${day()}`) : KNOWLEDGE_ROOT
     await this.app.fileManager.renameFile(legacy, destination)
+    for (const file of this.app.vault.getMarkdownFiles().filter(file => isPathInRoot(file.path, destination))) {
+      const content = await this.app.vault.read(file)
+      if (file.basename === '学习目录' && content.trimStart().startsWith('# 我的学习目录')) {
+        await this.app.vault.trash(file, false)
+        continue
+      }
+      const updated = rewriteMovedWikilinks(content, LEGACY_ROOT, destination)
+      if (updated !== content) await this.app.vault.modify(file, updated)
+    }
     await this.refresh()
     new Notice(`迁移完成：旧笔记已移动到 ${destination}，内部链接已同步更新。`, 8000)
     return destination
@@ -152,24 +170,53 @@ export default class StudyClub extends Plugin {
     await this.refresh()
     new Notice(`已移动到 ${KNOWLEDGE_ROOT} 并纳入学习手账，正文保持原样。`)
   }
-  async grade(path: string, grade: number) {
+  async grade(path: string, grade: number): Promise<ReviewChange> {
     if (this.mutations.has(path)) throw new Error('正在保存这张卡片，请稍后。')
     const file = this.app.vault.getAbstractFileByPath(path)
     if (!(file instanceof TFile)) throw new Error('笔记已移动或删除，请刷新目录。')
+    let change: ReviewChange | undefined
     this.mutations.add(path)
     try {
       await this.app.fileManager.processFrontMatter(file, fm => {
-        const current = schedule({ ease: fm['sc-ease'], interval: fm['sc-interval'], repetitions: fm['sc-repetitions'], dueDate: fm['sc-due'] })
-        const next = review(current, grade)
+        const previous = schedule({ ease: fm['sc-ease'], interval: fm['sc-interval'], repetitions: fm['sc-repetitions'], dueDate: fm['sc-due'] })
+        const next = review(previous, grade)
+        const hadReviews = Array.isArray(fm['sc-reviews'])
+        const previousReviews = Array.isArray(fm['sc-reviews']) ? [...fm['sc-reviews']] : []
+        const entry = `${new Date().toISOString()} | ${grade}`
+        change = { path, previous, next, previousStatus: fm['sc-status'], previousReviews, hadReviews, entry }
         fm['sc-ease'] = next.ease; fm['sc-interval'] = next.interval; fm['sc-repetitions'] = next.repetitions
         fm['sc-due'] = next.dueDate; fm['sc-updated'] = Date.now()
         if (fm['sc-status'] === 'to-learn') fm['sc-status'] = 'learning'
         // Schedule and history commit together in the same Markdown update.
-        const history = Array.isArray(fm['sc-reviews']) ? fm['sc-reviews'] : []
-        fm['sc-reviews'] = [...history, `${new Date().toISOString()} | ${grade}`]
+        fm['sc-reviews'] = [...previousReviews, entry]
       })
       await this.refresh()
+      if (!change) throw new Error('评分没有写入，请重试。')
+      return change
     } finally { this.mutations.delete(path) }
+  }
+  async undoGrade(change: ReviewChange): Promise<void> {
+    if (this.mutations.has(change.path)) throw new Error('正在保存这张卡片，请稍后。')
+    const file = this.app.vault.getAbstractFileByPath(change.path)
+    if (!(file instanceof TFile)) throw new Error('笔记已移动或删除，无法撤销。')
+    this.mutations.add(change.path)
+    try {
+      await this.app.fileManager.processFrontMatter(file, fm => {
+        const current = schedule({ ease: fm['sc-ease'], interval: fm['sc-interval'], repetitions: fm['sc-repetitions'], dueDate: fm['sc-due'] })
+        const reviews = Array.isArray(fm['sc-reviews']) ? fm['sc-reviews'] : []
+        if (JSON.stringify(current) !== JSON.stringify(change.next) ||
+          JSON.stringify(reviews) !== JSON.stringify([...change.previousReviews, change.entry]))
+          throw new Error('评分后笔记已发生其他变化，未自动撤销。')
+        fm['sc-ease'] = change.previous.ease; fm['sc-interval'] = change.previous.interval
+        fm['sc-repetitions'] = change.previous.repetitions; fm['sc-due'] = change.previous.dueDate
+        if (change.previousStatus === undefined) delete fm['sc-status']
+        else fm['sc-status'] = change.previousStatus
+        if (change.hadReviews) fm['sc-reviews'] = change.previousReviews
+        else delete fm['sc-reviews']
+        fm['sc-updated'] = Date.now()
+      })
+      await this.refresh()
+    } finally { this.mutations.delete(change.path) }
   }
   async setStatus(path: string, status: Status) {
     const file = this.app.vault.getAbstractFileByPath(path)
@@ -465,23 +512,74 @@ class NotebookView extends ItemView {
     this.heading(quiz ? '给自己一次小测验' : '今天，再想起来一次', quiz ?
       '题目来自笔记的「自测」章节。先回忆再翻面，答错可加入今日复习。' : '先主动回忆，再核对解释。评分会更新 Markdown 中的复习日期。')
     const chosen = field(this.main, '筛选领域或主题（可留空）')
-    const session = this.main.createDiv()
-    action(this.main, quiz ? '开始自测' : '开始复习', () => {
+    const today = day()
+    if (!quiz) {
+      const reviewableNotes = this.plugin.notes.filter(reviewable)
+      const overview = this.main.createDiv({ cls: 'sc-review-overview' })
+      for (const [value, label] of [
+        [reviewableNotes.filter(n => n.dueDate < today).length, '已逾期'],
+        [reviewableNotes.filter(n => n.dueDate === today).length, '今天到期'],
+        [reviewableNotes.filter(n => n.dueDate > today).length, '之后复习'],
+      ]) {
+        const item = overview.createDiv()
+        item.createEl('strong', { text: String(value) })
+        item.createSpan({ text: String(label) })
+      }
+    }
+    let session!: HTMLElement
+    const start = action(this.main, quiz ? '开始自测' : '开始复习', () => {
       const scope = chosen.value.trim()
       const eligible = this.plugin.notes.filter(n => `${n.domain} ${n.topic}`.includes(scope))
       const queue: { note: Note; q?: Quiz }[] = quiz ? eligible.flatMap(note => note.quiz.map(q => ({ note, q }))) :
-        eligible.filter(n => reviewable(n) && n.dueDate <= day()).map(note => ({ note }))
-      let i = 0, correct = 0, busy = false
+        reviewQueue(eligible, today).map(note => ({ note }))
+      let completed = 0, correct = 0, busy = false
+      let shortcut: ((key: string) => void) | undefined
+      let lastAction: {
+        change?: ReviewChange
+        queue: { note: Note; q?: Quiz }[]
+        completed: number
+        correct: number
+      } | undefined
+      start.remove()
+      chosen.disabled = true
+      this.rendered.registerDomEvent(document, 'keydown', event => {
+        const target = event.target as HTMLElement | null
+        if (event.metaKey || event.ctrlKey || event.altKey || target?.matches('input,textarea,select,[contenteditable="true"]')) return
+        if ((event.key === ' ' || /^[1-4]$/.test(event.key)) && shortcut) {
+          event.preventDefault()
+          shortcut(event.key)
+        }
+      })
       const paint = () => {
         session.empty()
-        if (!queue.length) { session.createEl('p', { text: quiz ? '还没有完整题目。请在自测章节填写「### 问题 1」与「#### 答案」。' : '这个范围内没有到期卡片。写下解释并开始学习后，卡片才会进入复习。', cls: 'sc-empty' }); return }
-        if (i >= queue.length) {
-          session.createEl('h2', { text: '这一轮完成了' })
-          session.createEl('p', { text: quiz ? `共 ${queue.length} 题，答对 ${correct} 题。` : `已完成 ${queue.length} 次回忆。` })
-          action(session, '回到扉页', () => this.navigate('home')); return
+        shortcut = undefined
+        if (lastAction) {
+          const undo = session.createDiv({ cls: 'sc-review-undo', attr: { 'aria-live': 'polite' } })
+          undo.createSpan({ text: '上一步已记录' })
+          action(undo, '撤销', async () => {
+            if (lastAction?.change) await this.plugin.undoGrade(lastAction.change)
+            queue.splice(0, queue.length, ...lastAction!.queue)
+            completed = lastAction!.completed
+            correct = lastAction!.correct
+            lastAction = undefined
+            paint()
+          })
         }
-        const item = queue[i]
-        session.createEl('p', { text: `${i + 1} / ${queue.length} · ${item.note.domain}`, cls: 'sc-muted' })
+        if (!queue.length) {
+          if (completed) {
+            session.createEl('h2', { text: '这一轮完成了' })
+            session.createEl('p', { text: quiz ? `共完成 ${completed} 题，答对 ${correct} 题。` : `已完成 ${completed} 次回忆。` })
+            action(session, '回到扉页', () => this.navigate('home'))
+          } else session.createEl('p', { text: quiz ? '还没有完整题目。请在自测章节填写「### 问题 1」与「#### 答案」。' : '这个范围内没有到期卡片。写下解释并开始学习后，卡片才会进入复习。', cls: 'sc-empty' })
+          return
+        }
+        const progress = session.createDiv({ cls: 'sc-review-progress' })
+        progress.createSpan({ text: `已完成 ${completed} · 剩余 ${queue.length}` })
+        const track = progress.createDiv()
+        const total = completed + queue.length
+        track.createDiv().style.width = `${total ? Math.round(completed / total * 100) : 100}%`
+        const item = queue[0]
+        session.createEl('p', { text: `${item.note.domain} / ${item.note.topic} · 到期 ${item.note.dueDate}`, cls: 'sc-muted' })
         const paper = session.createDiv({ cls: 'sc-recall' })
         paper.createEl('h2', { text: item.note.title })
         if (quiz) void this.markdown(paper, item.q!.question, item.note.path)
@@ -495,23 +593,37 @@ class NotebookView extends ItemView {
             if (busy) return
             busy = true
             try {
-              if (!quiz || isCorrect === false) await this.plugin.grade(item.note.path, grade)
+              const snapshot = { queue: [...queue], completed, correct }
+              const change = !quiz || isCorrect === false ? await this.plugin.grade(item.note.path, grade) : undefined
               if (isCorrect) correct++
-              i++; paint()
+              queue.shift()
+              completed++
+              if (!quiz && grade === 1) {
+                const repeated = change ? { ...item, note: { ...item.note, ...change.next } } : item
+                queue.splice(Math.min(2, queue.length), 0, repeated)
+              }
+              lastAction = { ...snapshot, change }
+              paint()
             } finally { busy = false }
           }
           if (quiz) {
-            action(controls, '答错 · 加入今日复习', () => finish(1, false))
-            action(controls, '答对', () => finish(3, true), true)
+            const wrong = action(controls, '1 · 答错，加入复习', () => finish(1, false))
+            const right = action(controls, '3 · 答对', () => finish(3, true), true)
+            shortcut = key => { if (key === '1') wrong.click(); if (key === '3') right.click() }
           } else for (const [grade, label] of [[1, '重来'], [2, '困难'], [3, '良好'], [4, '简单']] as const) {
             const next = review(item.note, grade)
-            action(controls, `${label} · ${grade === 1 ? '今日再来' : next.interval + ' 天'}`, () => finish(grade), grade === 3)
+            const button = action(controls, `${grade} · ${label} · ${grade === 1 ? '本轮再来' : next.dueDate}`, () => finish(grade), grade === 3)
+            button.dataset.grade = String(grade)
           }
+          if (!quiz) shortcut = key => controls.querySelector<HTMLButtonElement>(`[data-grade="${key}"]`)?.click()
         }, true)
+        shortcut = key => { if (key === ' ') flip.click() }
+        paper.createEl('p', { text: '空格显示答案 · 数字键评分', cls: 'sc-shortcuts' })
         action(session, '打开原笔记', () => this.plugin.openNote(item.note.path))
       }
       paint()
     }, true)
+    session = this.main.createDiv()
   }
   private questionList() {
     this.heading('还想弄明白的事', '每个追问是一篇独立 Markdown，可以继续写自己的回答。')

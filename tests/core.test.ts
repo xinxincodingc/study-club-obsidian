@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { validateBackup, planImport, makeNote, review, reviewable, safeRoot, isPathInRoot, quizFromMarkdown, retrieve } from '../src/core'
+import { validateBackup, planImport, makeNote, review, reviewable, reviewQueue, rewriteMovedWikilinks, safeRoot, isPathInRoot, quizFromMarkdown, retrieve } from '../src/core'
 
 function fixture() {
   return {
@@ -72,6 +72,11 @@ test('invalid data stops before producing files and parent traversal is rejected
   assert.equal(isPathInRoot('01 知识库旧/笔记.md', '01 知识库'), false)
   assert.equal(isPathInRoot('Study Club/笔记.md', '01 知识库'), false)
 })
+test('legacy absolute wiki links follow the migrated folder without changing relative links', () => {
+  const source = '[[Study Club/领域/笔记|标题]]\\n![[Study Club/附件.png]]\\n[[相对笔记]]'
+  assert.equal(rewriteMovedWikilinks(source, 'Study Club', '01 知识库/旧版迁移'),
+    '[[01 知识库/旧版迁移/领域/笔记|标题]]\\n![[01 知识库/旧版迁移/附件.png]]\\n[[相对笔记]]')
+})
 test('SM-2 writes a new schedule without mutating the original, with local calendar rollover', () => {
   const before = { ease: 2.5, interval: 6, repetitions: 2, dueDate: '2026-12-30' }
   const good = review(before, 3, new Date(2026, 11, 30, 23))
@@ -89,6 +94,18 @@ test('empty templates and empty quiz prompts do not become learning sessions', (
   assert.equal(note.quiz.length, 0)
   const adopted = makeNote('existing.md', { 'sc-status': 'learning' }, '这是我原来写下的一段解释。')
   assert.equal(reviewable(adopted), true)
+})
+test('review queue includes only due cards and orders the most overdue first', () => {
+  const note = (title: string, due: string, interval: number, body = '## 费曼解释\n有效内容') =>
+    makeNote(`${title}.md`, { 'sc-title': title, 'sc-status': 'learning', 'sc-due': due, 'sc-interval': interval }, body)
+  const queue = reviewQueue([
+    note('今天的新卡', '2026-10-10', 0),
+    note('昨天', '2026-10-09', 1),
+    note('更早', '2026-10-01', 6),
+    note('未来', '2026-10-11', 1),
+    note('空白', '2026-10-01', 0, '## 费曼解释\n'),
+  ], '2026-10-10')
+  assert.deepEqual(queue.map(n => n.title), ['更早', '昨天', '今天的新卡'])
 })
 test('quiz parser ignores headings inside fenced code', () => {
   const quiz = quizFromMarkdown('### 问题 1\n请解释代码：\n```md\n#### 答案\n```\n#### 答案\n这是代码示例。\n### 问题 2\n第二题\n#### 答案\n第二个答案')
